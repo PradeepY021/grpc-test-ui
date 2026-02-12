@@ -204,6 +204,60 @@ const JsonViewer = ({ jsonString }) => {
 
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
+// Audio feedback functions using Web Audio API
+const playSeriousTone = () => {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // Serious/alarm tone: lower frequency, harsh
+    oscillator.frequency.setValueAtTime(200, audioContext.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(150, audioContext.currentTime + 0.3);
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    
+    oscillator.type = 'sawtooth'; // Harsher sound
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+  } catch (e) {
+    console.log('Audio not supported:', e);
+  }
+};
+
+const playSoothingTone = () => {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Soothing tone: pleasant chime with multiple frequencies
+    const frequencies = [523.25, 659.25, 783.99]; // C, E, G major chord
+    
+    frequencies.forEach((freq, index) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(freq, audioContext.currentTime);
+      oscillator.type = 'sine'; // Smooth sound
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.2, audioContext.currentTime + 0.05 + index * 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5 + index * 0.05);
+      
+      oscillator.start(audioContext.currentTime + index * 0.05);
+      oscillator.stop(audioContext.currentTime + 0.5 + index * 0.05);
+    });
+  } catch (e) {
+    console.log('Audio not supported:', e);
+  }
+};
+
 // Pre-filled headers
 const DEFAULT_HEADERS = [
   { key: 'store_serviceability', value: '{"version":"v1","data":{"9785ce3b-ca57-4033-af1e-46504def34d9":{"cost":1,"type":"PRIMARY_STORE"},"d48222ae-a642-4aeb-9cee-e2829ebaa5e7":{"cost":1,"type":"SECONDARY_STORE"},"73bfbb51-d67b-4eff-9a4f-37c044022f89":{"cost":1,"type":"TERTIARY_STORE"}}}', enabled: true },
@@ -338,6 +392,7 @@ function App() {
       setMethods(sortedMethods);
     } catch (error) {
       setError(`Failed to load gRPC methods: ${error.message}`);
+      // Don't play sound for initial load errors to avoid annoying users
     }
   };
 
@@ -363,10 +418,12 @@ function App() {
       const response = await axios.post(`${API_BASE}/github/update-proto`, { githubToken });
       if (response.data.success) {
         await loadMethods();
+        playSoothingTone(); // Play soothing tone on success
         alert('Proto files updated successfully!');
       }
     } catch (error) {
       setError(error.response?.data?.message || 'Failed to update proto files');
+      playSeriousTone(); // Play serious tone on error
     } finally {
       setUpdatingProto(false);
     }
@@ -440,6 +497,7 @@ function App() {
   const handleGrpcCall = async () => {
     if (!selectedMethod) {
       setError('Please select a gRPC method');
+      playSeriousTone(); // Play serious tone for validation error
       return;
     }
 
@@ -455,6 +513,7 @@ function App() {
         messageObj = JSON.parse(cleanedMessage);
       } catch (e) {
         setError(`Invalid JSON in message field: ${e.message}`);
+        playSeriousTone(); // Play serious tone on validation error
         setLoading(false);
         return;
       }
@@ -477,8 +536,10 @@ function App() {
       });
 
       setResponse(response.data);
+      playSoothingTone(); // Play soothing tone on successful API response
     } catch (error) {
       setError(error.response?.data?.message || error.message || 'gRPC call failed');
+      playSeriousTone(); // Play serious tone on error
     } finally {
       setLoading(false);
     }
