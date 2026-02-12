@@ -450,7 +450,7 @@ async function fetchProtoFilesViaAPI(githubToken) {
   const apiClient = axios.create({
     baseURL: GITHUB_API_BASE,
     headers: {
-      'Authorization': `Bearer ${githubToken}`, // Use Bearer instead of token
+      'Authorization': `token ${githubToken}`, // GitHub API accepts 'token' for classic tokens
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'grpc-test-ui',
       'X-GitHub-Api-Version': '2022-11-28'
