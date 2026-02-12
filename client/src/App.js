@@ -537,13 +537,25 @@ function App() {
       
       // If we're waiting for a value and this line looks like a standalone value
       if (waitingForValue) {
-        // Check if this is a value without a key (like "value", or just value,)
-        const valueMatch = trimmed.match(/^"([^"]+)"\s*,?\s*$/);
-        const uuidMatch = trimmed.match(/^([a-f0-9-]+)\s*,?\s*$/);
+        // Check if this is a value without a key
+        // Pattern 1: Quoted value like "value",
+        const quotedValueMatch = trimmed.match(/^"([^"]+)"\s*,?\s*$/);
+        // Pattern 2: Unquoted UUID like 6385d009-d6f7-4566-977a-61c15a375155,
+        const uuidMatch = trimmed.match(/^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\s*,?\s*$/i);
+        // Pattern 3: Quoted UUID like "6385d009-d6f7-4566-977a-61c15a375155",
+        const quotedUuidMatch = trimmed.match(/^"([a-f0-9-]+)"\s*,?\s*$/i);
         
-        if (valueMatch || uuidMatch) {
+        if (quotedValueMatch || uuidMatch || quotedUuidMatch) {
           // This is a value - attach it to the last key
-          const value = valueMatch ? `"${valueMatch[1]}"` : `"${uuidMatch[1]}"`;
+          let value;
+          if (quotedValueMatch) {
+            value = `"${quotedValueMatch[1]}"`;
+          } else if (quotedUuidMatch) {
+            value = `"${quotedUuidMatch[1]}"`;
+          } else if (uuidMatch) {
+            value = `"${uuidMatch[1]}"`; // Add quotes to unquoted UUID
+          }
+          
           const lastLineIndex = cleaned.length - 1;
           cleaned[lastLineIndex] = cleaned[lastLineIndex] + ' ' + value;
           waitingForValue = false;
