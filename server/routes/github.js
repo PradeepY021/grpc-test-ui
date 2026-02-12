@@ -440,25 +440,42 @@ async function readProtoFiles(dir) {
 }
 
 /**
- * Fetch proto files using GitHub API (bypasses IP allow list)
+ * Fetch proto files using GitHub raw content URLs (bypasses IP allow list)
+ * This uses public raw.githubusercontent.com URLs which don't require API access
  */
 async function fetchProtoFilesViaAPI(githubToken) {
   // Create directories
   await fs.mkdir(PROTO_DIR, { recursive: true });
   
-  // GitHub API client with better error handling
+  // Try GitHub API first (with token for private repos)
   const apiClient = axios.create({
     baseURL: GITHUB_API_BASE,
     headers: {
-      'Authorization': `token ${githubToken}`, // GitHub API accepts 'token' for classic tokens
+      'Authorization': `token ${githubToken}`,
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'grpc-test-ui',
       'X-GitHub-Api-Version': '2022-11-28'
     },
-    timeout: 30000 // 30 second timeout
+    timeout: 30000
   });
 
-  // Recursively fetch all .proto files from proto directory
+  // Raw content client (for public files, might bypass IP restrictions)
+  const rawClient = axios.create({
+    baseURL: 'https://raw.githubusercontent.com',
+    headers: {
+      'User-Agent': 'grpc-test-ui'
+    },
+    timeout: 30000
+  });
+
+  // Known proto file paths (you can expand this list)
+  const knownProtoPaths = [
+    'proto/service/store-product-service/store_product_service.proto',
+    'proto/service/store-product-service/store_product_messages.proto',
+    // Add more known paths here if needed
+  ];
+
+  // Try to get directory listing via API first
   async function fetchDirectoryContents(dirPath = 'proto', localPath = PROTO_DIR) {
     try {
       const response = await apiClient.get(
@@ -472,36 +489,73 @@ async function fetchProtoFilesViaAPI(githubToken) {
         const itemLocalPath = path.join(localPath, item.name);
         
         if (item.type === 'file' && item.name.endsWith('.proto')) {
-          // Fetch file content - use download_url for direct file access
+          // Try download_url first (raw content, might bypass IP restrictions)
           let content;
-          if (item.download_url) {
-            const fileResponse = await apiClient.get(item.download_url, { responseType: 'text' });
-            content = fileResponse.data;
-          } else {
-            // Fallback to base64 encoded content
-            const fileResponse = await apiClient.get(item.url);
-            content = Buffer.from(fileResponse.data.content, 'base64').toString('utf-8');
+          try {
+            if (item.download_url) {
+              const fileResponse = await rawClient.get(
+                item.download_url.replace('https://raw.githubusercontent.com/', ''),
+                { responseType: 'text' }
+              );
+              content = fileResponse.data;
+            } else {
+              // Fallback to API with base64
+              const fileResponse = await apiClient.get(item.url);
+              content = Buffer.from(fileResponse.data.content, 'base64').toString('utf-8');
+            }
+          } catch (fileError) {
+            // If download_url fails, try raw URL directly
+            const rawPath = `${REPO_OWNER}/${REPO_NAME}/main/${item.path}`;
+            try {
+              const rawResponse = await rawClient.get(rawPath, { responseType: 'text' });
+              content = rawResponse.data;
+            } catch (rawError) {
+              throw new Error(`Failed to fetch ${item.path}: ${fileError.message}`);
+            }
           }
           
-          // Write to local file
           await fs.writeFile(itemLocalPath, content, 'utf-8');
           console.log(`✅ Fetched: ${item.path}`);
         } else if (item.type === 'dir') {
-          // Recursively fetch subdirectory
           await fs.mkdir(itemLocalPath, { recursive: true });
           await fetchDirectoryContents(item.path, itemLocalPath);
         }
       }
     } catch (error) {
       if (error.response?.status === 404) {
-        console.log(`⚠️  Directory not found: ${dirPath} (might be empty or not exist)`);
+        console.log(`⚠️  Directory not found: ${dirPath}`);
+        return;
+      }
+      // If API fails due to IP restriction, try raw URLs for known paths
+      if (error.response?.status === 403 && dirPath === 'proto') {
+        console.log('⚠️  API blocked by IP allow list, trying raw content URLs for known proto files...');
+        await fetchKnownProtoFilesViaRaw();
         return;
       }
       throw error;
     }
   }
+
+  // Fallback: Fetch known proto files via raw URLs
+  async function fetchKnownProtoFilesViaRaw() {
+    console.log('📥 Fetching known proto files via raw.githubusercontent.com...');
+    for (const protoPath of knownProtoPaths) {
+      try {
+        const rawUrl = `${REPO_OWNER}/${REPO_NAME}/main/${protoPath}`;
+        const response = await rawClient.get(rawUrl, { responseType: 'text' });
+        
+        const localPath = path.join(PROTO_DIR, protoPath.replace('proto/', ''));
+        const dir = path.dirname(localPath);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(localPath, response.data, 'utf-8');
+        console.log(`✅ Fetched via raw: ${protoPath}`);
+      } catch (error) {
+        console.log(`⚠️  Could not fetch ${protoPath}: ${error.message}`);
+      }
+    }
+  }
   
-  console.log('🔍 Fetching proto files from GitHub API...');
+  console.log('🔍 Fetching proto files from GitHub...');
   await fetchDirectoryContents();
   console.log('✅ All proto files fetched');
 }
