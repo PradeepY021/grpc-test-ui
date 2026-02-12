@@ -403,9 +403,16 @@ async function fetchProtoFilesViaAPI(githubToken) {
         const itemLocalPath = path.join(localPath, item.name);
         
         if (item.type === 'file' && item.name.endsWith('.proto')) {
-          // Fetch file content
-          const fileResponse = await apiClient.get(item.url);
-          const content = Buffer.from(fileResponse.data.content, 'base64').toString('utf-8');
+          // Fetch file content - use download_url for direct file access
+          let content;
+          if (item.download_url) {
+            const fileResponse = await apiClient.get(item.download_url, { responseType: 'text' });
+            content = fileResponse.data;
+          } else {
+            // Fallback to base64 encoded content
+            const fileResponse = await apiClient.get(item.url);
+            content = Buffer.from(fileResponse.data.content, 'base64').toString('utf-8');
+          }
           
           // Write to local file
           await fs.writeFile(itemLocalPath, content, 'utf-8');
