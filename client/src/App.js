@@ -490,11 +490,13 @@ function App() {
     // 1. Lines starting with // (after whitespace)
     // 2. Inline comments like: "key": //"value",
     // 3. Multi-line commented values
-    // 4. Preserves // inside string values
+    // 4. Values without keys (when previous key had commented value)
+    // 5. Preserves // inside string values
     
     const lines = jsonString.split('\n');
     let cleaned = [];
-    let inCommentedValue = false; // Track if we're in a multi-line commented value
+    let waitingForValue = false; // Track if we're waiting for a value after a key with commented value
+    let lastKey = null; // Remember the last key that needs a value
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -502,13 +504,6 @@ function App() {
       
       // Skip lines that are empty or start with //
       if (trimmed.length === 0 || trimmed.startsWith('//')) {
-        // If we're in a commented value, continue skipping
-        if (inCommentedValue) {
-          // Check if this commented line ends the value (has closing quote and comma)
-          if (trimmed.includes('",') || trimmed.includes('"')) {
-            inCommentedValue = false;
-          }
-        }
         continue;
       }
       
@@ -521,14 +516,14 @@ function App() {
         
         if (stringMatches && stringMatches.length % 2 === 0) {
           // Even number of quotes before // means we're outside a string
-          // This is a comment - remove everything from // onwards
           const beforeCommentTrimmed = beforeComment.trim();
           
           // Check if this was a key with a commented value (like "key": //"value")
           if (beforeCommentTrimmed.endsWith(':')) {
-            // Key with commented value - keep the key, remove the comment
+            // Key with commented value - keep the key, mark that we're waiting for value
             cleaned.push(beforeCommentTrimmed);
-            inCommentedValue = true; // Next lines might be part of commented value
+            waitingForValue = true;
+            lastKey = beforeCommentTrimmed.replace(/:\s*$/, '').replace(/^"|"$/g, '');
             continue;
           }
           
@@ -540,17 +535,24 @@ function App() {
         }
       }
       
-      // If we're in a commented value, check if this line ends it
-      if (inCommentedValue) {
-        // Check if this line looks like the end of a commented value
-        // (has closing quote, possibly with comma)
-        if (trimmed.includes('",') || (trimmed.includes('"') && !trimmed.startsWith('"'))) {
-          inCommentedValue = false;
-          // Skip this line as it's part of the commented value
+      // If we're waiting for a value and this line looks like a standalone value
+      if (waitingForValue) {
+        // Check if this is a value without a key (like "value", or just value,)
+        const valueMatch = trimmed.match(/^"([^"]+)"\s*,?\s*$/);
+        const uuidMatch = trimmed.match(/^([a-f0-9-]+)\s*,?\s*$/);
+        
+        if (valueMatch || uuidMatch) {
+          // This is a value - attach it to the last key
+          const value = valueMatch ? `"${valueMatch[1]}"` : `"${uuidMatch[1]}"`;
+          const lastLineIndex = cleaned.length - 1;
+          cleaned[lastLineIndex] = cleaned[lastLineIndex] + ' ' + value;
+          waitingForValue = false;
+          lastKey = null;
           continue;
         } else {
-          // Still in commented value, skip this line
-          continue;
+          // Not a standalone value, reset waiting state
+          waitingForValue = false;
+          lastKey = null;
         }
       }
       
@@ -565,9 +567,10 @@ function App() {
     result = result.replace(/,(\s*[}\]])/g, '$1');
     
     // Fix cases where key has no value (like "key":  with nothing after)
-    // This happens when we removed a commented value
     result = result.replace(/:\s*$/gm, ': null');
-    result = result.replace(/:\s*\n\s*"/gm, ':\n    "'); // Fix formatting
+    
+    // Remove duplicate commas
+    result = result.replace(/,\s*,/g, ',');
     
     return result;
   };
