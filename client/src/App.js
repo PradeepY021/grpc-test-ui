@@ -604,6 +604,22 @@ function App() {
           >
             {updatingProto ? 'Updating...' : 'UPDATE PROTO'}
           </button>
+          <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+            <button
+              onClick={playSoothingTone}
+              style={{ padding: '8px 12px', background: '#10b981', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+              title="Test success tone"
+            >
+              🔊 Test Success
+            </button>
+            <button
+              onClick={playSeriousTone}
+              style={{ padding: '8px 12px', background: '#dc2626', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+              title="Test error tone"
+            >
+              🔔 Test Error
+            </button>
+          </div>
         </div>
       </div>
 
