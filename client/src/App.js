@@ -205,9 +205,34 @@ const JsonViewer = ({ jsonString }) => {
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
 // Audio feedback functions using Web Audio API
+// Create a single audio context that persists (required for browser security)
+let audioContext = null;
+
+const initAudioContext = () => {
+  if (!audioContext) {
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.log('Audio context creation failed:', e);
+      return false;
+    }
+  }
+  
+  // Resume audio context if suspended (browser security requirement)
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().catch(e => {
+      console.log('Audio context resume failed:', e);
+      return false;
+    });
+  }
+  
+  return true;
+};
+
 const playSeriousTone = () => {
+  if (!initAudioContext()) return;
+  
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     
@@ -225,14 +250,14 @@ const playSeriousTone = () => {
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + 0.3);
   } catch (e) {
-    console.log('Audio not supported:', e);
+    console.log('Error playing serious tone:', e);
   }
 };
 
 const playSoothingTone = () => {
+  if (!initAudioContext()) return;
+  
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
     // Soothing tone: pleasant chime with multiple frequencies
     const frequencies = [523.25, 659.25, 783.99]; // C, E, G major chord
     
@@ -254,7 +279,7 @@ const playSoothingTone = () => {
       oscillator.stop(audioContext.currentTime + 0.5 + index * 0.05);
     });
   } catch (e) {
-    console.log('Audio not supported:', e);
+    console.log('Error playing soothing tone:', e);
   }
 };
 
@@ -326,6 +351,18 @@ function App() {
       setSavedToken(saved);
       setGithubToken(saved);
     }
+    
+    // Initialize audio context on first user interaction (required by browsers)
+    const initAudio = () => {
+      if (!audioContext) {
+        initAudioContext();
+      }
+      document.removeEventListener('click', initAudio);
+      document.removeEventListener('keydown', initAudio);
+    };
+    
+    document.addEventListener('click', initAudio, { once: true });
+    document.addEventListener('keydown', initAudio, { once: true });
   }, []);
 
   // Handle resize drag for response box
