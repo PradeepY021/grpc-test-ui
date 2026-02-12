@@ -459,13 +459,11 @@ async function fetchProtoFilesViaAPI(githubToken) {
     timeout: 30000
   });
 
-  // Raw content client with token authentication for private repos
+  // Raw content client - for private repos, token must be in URL
   const rawClient = axios.create({
     baseURL: 'https://raw.githubusercontent.com',
     headers: {
-      'Authorization': `token ${githubToken}`,
-      'User-Agent': 'grpc-test-ui',
-      'Accept': 'application/vnd.github.v3.raw'
+      'User-Agent': 'grpc-test-ui'
     },
     timeout: 30000
   });
@@ -556,27 +554,55 @@ async function fetchProtoFilesViaAPI(githubToken) {
     }
   }
 
-  // Fallback: Fetch known proto files via raw URLs with authentication
+  // Fallback: Fetch known proto files via GitHub API contents endpoint (download_url)
+  // This uses the API but only for file downloads, might have different IP restrictions
   async function fetchKnownProtoFilesViaRaw() {
-    console.log('📥 Fetching known proto files via raw.githubusercontent.com with token auth...');
+    console.log('📥 Fetching known proto files via GitHub API contents endpoint...');
     let successCount = 0;
     let failCount = 0;
     
     for (const protoPath of knownProtoPaths) {
       try {
-        // Use authenticated raw URL: https://raw.githubusercontent.com/owner/repo/branch/path
-        const rawUrl = `${REPO_OWNER}/${REPO_NAME}/main/${protoPath}`;
-        const response = await rawClient.get(rawUrl, { responseType: 'text' });
+        // Use GitHub API contents endpoint to get download_url
+        const apiPath = `/repos/${REPO_OWNER}/${REPO_NAME}/contents/${protoPath}`;
+        const contentResponse = await apiClient.get(apiPath, { params: { ref: 'main' } });
+        
+        let content;
+        if (contentResponse.data.download_url) {
+          // Try download_url first (raw content, might bypass some restrictions)
+          try {
+            const downloadResponse = await axios.get(contentResponse.data.download_url, {
+              headers: { 'Authorization': `token ${githubToken}` },
+              responseType: 'text',
+              timeout: 10000
+            });
+            content = downloadResponse.data;
+          } catch (downloadError) {
+            // If download_url fails, decode base64 from API response
+            if (contentResponse.data.content && contentResponse.data.encoding === 'base64') {
+              content = Buffer.from(contentResponse.data.content, 'base64').toString('utf-8');
+            } else {
+              throw downloadError;
+            }
+          }
+        } else if (contentResponse.data.content && contentResponse.data.encoding === 'base64') {
+          // Direct base64 decode
+          content = Buffer.from(contentResponse.data.content, 'base64').toString('utf-8');
+        } else {
+          throw new Error('No content available');
+        }
         
         // Maintain directory structure
         const localPath = path.join(PROTO_DIR, protoPath.replace(/^proto\//, ''));
         const dir = path.dirname(localPath);
         await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(localPath, response.data, 'utf-8');
-        console.log(`✅ Fetched via raw: ${protoPath}`);
+        await fs.writeFile(localPath, content, 'utf-8');
+        console.log(`✅ Fetched: ${protoPath}`);
         successCount++;
       } catch (error) {
-        console.log(`⚠️  Could not fetch ${protoPath}: ${error.response?.status || error.message}`);
+        const status = error.response?.status;
+        const msg = error.response?.data?.message || error.message;
+        console.log(`⚠️  Could not fetch ${protoPath}: ${status || 'error'} - ${msg}`);
         failCount++;
       }
     }
@@ -584,11 +610,11 @@ async function fetchProtoFilesViaAPI(githubToken) {
     console.log(`📊 Fetched ${successCount} files, ${failCount} failed`);
     
     if (successCount === 0) {
-      throw new Error('Failed to fetch any proto files via raw URLs. The repository might be private and raw URLs require different authentication.');
+      throw new Error(`Failed to fetch any proto files. All ${knownProtoPaths.length} files failed. This is likely due to IP allow list restrictions. Please contact your GitHub org admin to whitelist Render's IP addresses, or use a different deployment method.`);
     }
     
     if (failCount > 0) {
-      console.log(`⚠️  Some files failed to fetch. You may need to add more proto file paths to the knownProtoPaths array.`);
+      console.log(`⚠️  ${failCount} files failed to fetch. Some proto files may be missing.`);
     }
   }
   
