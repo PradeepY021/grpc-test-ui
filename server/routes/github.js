@@ -45,31 +45,50 @@ router.post('/update-proto', async (req, res) => {
       needsClone = true;
     }
 
-    // Use GitHub API to fetch proto files (bypasses IP allow list)
+    // Try git clone first (works if token has access), fallback to API if IP restricted
     let usedAPI = false;
     if (needsClone && IS_PRODUCTION) {
-      console.log('📦 Fetching proto files via GitHub API (bypasses IP restrictions)...');
+      console.log('📦 Attempting to clone repository with git (token works locally, should work here too)...');
       try {
-        await fetchProtoFilesViaAPI(githubToken);
-        console.log('✅ Proto files fetched successfully via API');
-        usedAPI = true; // Mark that we used API, skip git operations
-      } catch (apiError) {
-        console.error('❌ GitHub API error:', apiError);
-        const errorMsg = apiError.response?.data?.message || apiError.message;
-        const statusCode = apiError.response?.status || 500;
+        // Create parent directory if needed
+        const parentDir = path.dirname(REPO_DIR);
+        await fs.mkdir(parentDir, { recursive: true });
         
-        // Better error messages for common issues
-        if (statusCode === 403) {
-          return res.status(403).json({
-            error: 'GitHub API access denied',
-            message: `GitHub API returned 403. This usually means:\n1. Your token needs SSO authorization for zeptonow organization\n2. Go to: https://github.com/settings/tokens\n3. Find your token and click "Enable SSO" next to zeptonow\n4. Authorize the token\n\nOriginal error: ${errorMsg}`
+        // Clone with authentication
+        const authenticatedUrl = `https://${githubToken}@github.com/${REPO_OWNER}/${REPO_NAME}.git`;
+        console.log('🔧 Cloning from GitHub...');
+        
+        const git = simpleGit();
+        await git.clone(authenticatedUrl, REPO_DIR, ['--depth', '1', '--branch', 'main']);
+        console.log('✅ Repository cloned successfully with git');
+        // Git clone worked, continue with normal flow
+      } catch (cloneError) {
+        console.log('⚠️  Git clone failed, trying GitHub API as fallback...');
+        console.log('Clone error:', cloneError.message);
+        
+        // If git clone fails (likely IP restriction), try GitHub API
+        try {
+          await fetchProtoFilesViaAPI(githubToken);
+          console.log('✅ Proto files fetched successfully via API');
+          usedAPI = true; // Mark that we used API, skip git operations
+        } catch (apiError) {
+          console.error('❌ GitHub API error:', apiError);
+          const errorMsg = apiError.response?.data?.message || apiError.message;
+          const statusCode = apiError.response?.status || 500;
+          
+          // Better error messages
+          if (statusCode === 403) {
+            return res.status(403).json({
+              error: 'GitHub access denied',
+              message: `Both git clone and GitHub API returned 403.\n\nThis usually means:\n1. Your token needs SSO authorization for zeptonow organization\n2. Go to: https://github.com/settings/tokens\n3. Find your token and click "Enable SSO" next to zeptonow\n4. Authorize the token\n5. Wait a few minutes, then try again\n\nOriginal error: ${errorMsg}`
+            });
+          }
+          
+          return res.status(500).json({
+            error: 'Failed to fetch proto files',
+            message: `Both git clone and GitHub API failed.\n\nGit error: ${cloneError.message}\nAPI error: ${errorMsg}\n\nPlease check your GitHub token has access to zeptonow/product-assortment-service.`
           });
         }
-        
-        return res.status(500).json({
-          error: 'Failed to fetch proto files',
-          message: `Failed to fetch proto files via GitHub API: ${errorMsg}. Please check your GitHub token has access to zeptonow/product-assortment-service.`
-        });
       }
     } else if (needsClone && !IS_PRODUCTION) {
       return res.status(404).json({
