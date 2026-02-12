@@ -488,23 +488,29 @@ function App() {
     // Remove comments from JSON string and fix structure
     // Handles cases like: "key": //"old", "new_value",
     
-    // First, handle the specific pattern: key with commented value followed by standalone value
-    // Pattern: "key": //"old", "new",
-    let result = jsonString.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*\n\s*"([^"]+)",/g, '"$1": "$2",');
+    // Step 1: Handle multi-line pattern where key has commented value and next line has the actual value
+    // Pattern: "key": //"old",\n    "new",
+    // This regex matches across newlines with flexible whitespace
+    let result = jsonString.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*\n\s*"([^"]+)"\s*,/g, '"$1": "$2",');
     
-    // Pattern: "key": //"old", new_value, (unquoted)
-    result = result.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*\n\s*([a-f0-9-]+)\s*,/gi, '"$1": "$2",');
+    // Pattern: "key": //"old",\n    new_value, (unquoted UUID)
+    result = result.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*\n\s*([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\s*,/gi, '"$1": "$2",');
     
-    // Now handle general comment removal
+    // Step 2: Handle same-line pattern: "key": //"old", "new",
+    result = result.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*"([^"]+)"\s*,/g, '"$1": "$2",');
+    result = result.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\s*,/gi, '"$1": "$2",');
+    
+    // Step 3: Now handle general comment removal line by line
     const lines = result.split('\n');
     let cleaned = [];
     let waitingForValue = false;
+    let lastKeyLine = null;
     
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i];
       const trimmed = line.trim();
       
-      // Skip empty lines or lines starting with //
+      // Skip empty lines or lines that are only comments
       if (trimmed.length === 0 || trimmed.startsWith('//')) {
         continue;
       }
@@ -515,17 +521,19 @@ function App() {
         const beforeComment = line.substring(0, commentIndex);
         const stringMatches = beforeComment.match(/"/g);
         
+        // If even number of quotes before //, we're outside a string
         if (stringMatches && stringMatches.length % 2 === 0) {
           const beforeCommentTrimmed = beforeComment.trim();
           
-          // Key with commented value
+          // Key with commented value: "key": //"value"
           if (beforeCommentTrimmed.endsWith(':')) {
             cleaned.push(beforeCommentTrimmed);
             waitingForValue = true;
+            lastKeyLine = cleaned.length - 1;
             continue;
           }
           
-          // Regular inline comment
+          // Regular inline comment - keep everything before //
           if (beforeCommentTrimmed.length > 0) {
             cleaned.push(beforeCommentTrimmed);
           }
@@ -534,7 +542,7 @@ function App() {
       }
       
       // If waiting for value, check if this line is a standalone value
-      if (waitingForValue) {
+      if (waitingForValue && lastKeyLine !== null) {
         // Quoted value: "value",
         const quotedMatch = trimmed.match(/^"([^"]+)"\s*,?\s*$/);
         // Unquoted UUID: 6385d009-d6f7-4566-977a-61c15a375155,
@@ -542,30 +550,35 @@ function App() {
         
         if (quotedMatch || uuidMatch) {
           const value = quotedMatch ? `"${quotedMatch[1]}"` : `"${uuidMatch[1]}"`;
-          const lastIndex = cleaned.length - 1;
-          if (lastIndex >= 0) {
-            cleaned[lastIndex] = cleaned[lastIndex] + ' ' + value;
-          }
+          cleaned[lastKeyLine] = cleaned[lastKeyLine] + ' ' + value;
           waitingForValue = false;
+          lastKeyLine = null;
           continue;
         } else {
+          // Not a standalone value, reset waiting state
           waitingForValue = false;
+          lastKeyLine = null;
         }
       }
       
+      // Normal line - add it
       cleaned.push(line);
     }
     
     result = cleaned.join('\n');
     
-    // Clean up trailing commas
+    // Step 4: Final cleanup
+    // Remove trailing commas before closing braces/brackets
     result = result.replace(/,(\s*[}\]])/g, '$1');
     
-    // Fix keys without values
+    // Fix keys without values (shouldn't happen after our fixes, but safety net)
     result = result.replace(/:\s*$/gm, ': null');
     
     // Remove duplicate commas
     result = result.replace(/,\s*,/g, ',');
+    
+    // Remove any remaining standalone comment lines that might have been missed
+    result = result.replace(/^\s*\/\/.*$/gm, '');
     
     return result;
   };
