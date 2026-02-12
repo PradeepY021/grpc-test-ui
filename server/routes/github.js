@@ -3,10 +3,15 @@ const router = express.Router();
 const fs = require('fs').promises;
 const path = require('path');
 const simpleGit = require('simple-git');
+const os = require('os');
 
-// Repository location where we'll do git pull
-const REPO_DIR = '/Users/pradeepyadav/Documents/product-assortment-service';
+// Repository location - use temp directory on Render, local path on development
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.RENDER;
+const REPO_DIR = IS_PRODUCTION 
+  ? path.join(os.tmpdir(), 'product-assortment-service')
+  : '/Users/pradeepyadav/Documents/product-assortment-service';
 const PROTO_DIR = path.join(REPO_DIR, 'proto');
+const REPO_URL = 'https://github.com/zeptonow/product-assortment-service.git';
 
 /**
  * Update proto files by doing git pull with GitHub token authentication
@@ -22,10 +27,43 @@ router.post('/update-proto', async (req, res) => {
       });
     }
 
-    // Check if repository directory exists
+    // Check if repository directory exists, clone if needed (for production)
+    let needsClone = false;
     try {
       await fs.access(REPO_DIR);
+      // Check if it's a git repo
+      try {
+        await fs.access(path.join(REPO_DIR, '.git'));
+      } catch {
+        needsClone = true;
+      }
     } catch (error) {
+      needsClone = true;
+    }
+
+    // Clone repository if needed (production/Render)
+    if (needsClone && IS_PRODUCTION) {
+      console.log('📦 Cloning repository for the first time...');
+      try {
+        // Create parent directory if needed
+        const parentDir = path.dirname(REPO_DIR);
+        await fs.mkdir(parentDir, { recursive: true });
+        
+        // Clone with authentication
+        const authenticatedUrl = `https://${githubToken}@github.com/zeptonow/product-assortment-service.git`;
+        console.log('🔧 Cloning from:', authenticatedUrl.replace(githubToken, '***'));
+        
+        const git = simpleGit();
+        await git.clone(authenticatedUrl, REPO_DIR, ['--depth', '1', '--branch', 'main']);
+        console.log('✅ Repository cloned successfully');
+      } catch (cloneError) {
+        console.error('❌ Clone error:', cloneError);
+        return res.status(500).json({
+          error: 'Failed to clone repository',
+          message: `Failed to clone repository: ${cloneError.message}. Please check your GitHub token has access to zeptonow/product-assortment-service.`
+        });
+      }
+    } else if (needsClone && !IS_PRODUCTION) {
       return res.status(404).json({
         error: 'Repository directory not found',
         message: `Repository directory not found at: ${REPO_DIR}. Please ensure the product-assortment-service repository exists at this location.`,
@@ -35,8 +73,13 @@ router.post('/update-proto', async (req, res) => {
 
     // Get current remote URL
     const git = simpleGit(REPO_DIR);
-    const originalUrl = await git.getConfig('remote.origin.url');
-    const currentRemoteUrl = originalUrl.value || '';
+    let originalUrl, currentRemoteUrl;
+    try {
+      originalUrl = await git.getConfig('remote.origin.url');
+      currentRemoteUrl = originalUrl.value || REPO_URL;
+    } catch {
+      currentRemoteUrl = REPO_URL;
+    }
     
     // Extract repo path from URL (e.g., https://github.com/zeptonow/product-assortment-service.git or git@github.com:zeptonow/product-assortment-service.git)
     let repoPath = '';

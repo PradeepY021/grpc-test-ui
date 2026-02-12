@@ -4,8 +4,12 @@ const fs = require('fs').promises;
 const path = require('path');
 const { parseProtoFile } = require('../utils/protoParser');
 
-// Use existing proto location where user does manual git pull
-const PROTO_BASE_DIR = '/Users/pradeepyadav/Documents/product-assortment-service';
+// Use temp directory on Render, local path on development
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.RENDER;
+const os = require('os');
+const PROTO_BASE_DIR = IS_PRODUCTION 
+  ? path.join(os.tmpdir(), 'product-assortment-service')
+  : '/Users/pradeepyadav/Documents/product-assortment-service';
 const PROTO_DIR = path.join(PROTO_BASE_DIR, 'proto');
 const LOCAL_PROTO_DIR = path.join(__dirname, '../../../proto'); // Fallback to local
 
