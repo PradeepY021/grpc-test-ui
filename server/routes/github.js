@@ -46,16 +46,29 @@ router.post('/update-proto', async (req, res) => {
     }
 
     // Use GitHub API to fetch proto files (bypasses IP allow list)
+    let usedAPI = false;
     if (needsClone && IS_PRODUCTION) {
       console.log('📦 Fetching proto files via GitHub API (bypasses IP restrictions)...');
       try {
         await fetchProtoFilesViaAPI(githubToken);
         console.log('✅ Proto files fetched successfully via API');
+        usedAPI = true; // Mark that we used API, skip git operations
       } catch (apiError) {
         console.error('❌ GitHub API error:', apiError);
+        const errorMsg = apiError.response?.data?.message || apiError.message;
+        const statusCode = apiError.response?.status || 500;
+        
+        // Better error messages for common issues
+        if (statusCode === 403) {
+          return res.status(403).json({
+            error: 'GitHub API access denied',
+            message: `GitHub API returned 403. This usually means:\n1. Your token needs SSO authorization for zeptonow organization\n2. Go to: https://github.com/settings/tokens\n3. Find your token and click "Enable SSO" next to zeptonow\n4. Authorize the token\n\nOriginal error: ${errorMsg}`
+          });
+        }
+        
         return res.status(500).json({
           error: 'Failed to fetch proto files',
-          message: `Failed to fetch proto files via GitHub API: ${apiError.message}. Please check your GitHub token has access to zeptonow/product-assortment-service.`
+          message: `Failed to fetch proto files via GitHub API: ${errorMsg}. Please check your GitHub token has access to zeptonow/product-assortment-service.`
         });
       }
     } else if (needsClone && !IS_PRODUCTION) {
@@ -66,7 +79,42 @@ router.post('/update-proto', async (req, res) => {
       });
     }
 
-    // Get current remote URL
+    // If we used API, skip git operations and go straight to reading proto files
+    if (usedAPI) {
+      // Read proto files directly from the API-fetched location
+      console.log('📖 Reading proto files from API-fetched location...');
+      let protoFiles;
+      try {
+        protoFiles = await readProtoFiles(PROTO_DIR);
+        console.log(`✅ Found ${Object.keys(protoFiles).length} proto files`);
+      } catch (readError) {
+        console.error('❌ Error reading proto files:', readError);
+        return res.status(500).json({
+          error: 'Failed to read proto files',
+          message: `Error reading proto files: ${readError.message}`,
+          checkedPath: PROTO_DIR
+        });
+      }
+      
+      if (Object.keys(protoFiles).length === 0) {
+        return res.status(404).json({
+          error: 'No proto files found',
+          message: `No .proto files found in: ${PROTO_DIR}. Please check if proto files exist in the repository.`,
+          checkedPath: PROTO_DIR
+        });
+      }
+      
+      return res.json({
+        success: true,
+        message: 'Proto files updated successfully via GitHub API',
+        protoFiles: protoFiles,
+        protoLocation: PROTO_DIR,
+        fileCount: Object.keys(protoFiles).length,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Get current remote URL (only for local git operations)
     const git = simpleGit(REPO_DIR);
     let originalUrl, currentRemoteUrl;
     try {
@@ -379,14 +427,16 @@ async function fetchProtoFilesViaAPI(githubToken) {
   // Create directories
   await fs.mkdir(PROTO_DIR, { recursive: true });
   
-  // GitHub API client
+  // GitHub API client with better error handling
   const apiClient = axios.create({
     baseURL: GITHUB_API_BASE,
     headers: {
-      'Authorization': `token ${githubToken}`,
+      'Authorization': `Bearer ${githubToken}`, // Use Bearer instead of token
       'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'grpc-test-ui'
-    }
+      'User-Agent': 'grpc-test-ui',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    timeout: 30000 // 30 second timeout
   });
 
   // Recursively fetch all .proto files from proto directory
