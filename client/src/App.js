@@ -489,46 +489,87 @@ function App() {
     // Handles:
     // 1. Lines starting with // (after whitespace)
     // 2. Inline comments like: "key": //"value",
-    // 3. Preserves // inside string values
+    // 3. Multi-line commented values
+    // 4. Preserves // inside string values
     
-    let cleaned = jsonString
-      .split('\n')
-      .map(line => {
-        const trimmed = line.trim();
-        
-        // Skip lines that are empty or start with //
-        if (trimmed.length === 0 || trimmed.startsWith('//')) {
-          return '';
-        }
-        
-        // Check if line has // comment (not at start)
-        const commentIndex = line.indexOf('//');
-        if (commentIndex !== -1) {
-          // Check if // is inside a string
-          const beforeComment = line.substring(0, commentIndex);
-          const stringMatches = beforeComment.match(/"/g);
-          
-          if (stringMatches && stringMatches.length % 2 === 0) {
-            // Even number of quotes before // means we're outside a string
-            // Remove everything from // onwards, but keep trailing comma if it was before //
-            const beforeCommentTrimmed = beforeComment.trim();
-            if (beforeCommentTrimmed.endsWith(',')) {
-              return beforeCommentTrimmed;
-            }
-            // Check if we need to add comma back (if next non-comment line exists)
-            return beforeComment.trim();
+    const lines = jsonString.split('\n');
+    let cleaned = [];
+    let inCommentedValue = false; // Track if we're in a multi-line commented value
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      
+      // Skip lines that are empty or start with //
+      if (trimmed.length === 0 || trimmed.startsWith('//')) {
+        // If we're in a commented value, continue skipping
+        if (inCommentedValue) {
+          // Check if this commented line ends the value (has closing quote and comma)
+          if (trimmed.includes('",') || trimmed.includes('"')) {
+            inCommentedValue = false;
           }
         }
+        continue;
+      }
+      
+      // Check if line has // comment (not at start)
+      const commentIndex = line.indexOf('//');
+      if (commentIndex !== -1) {
+        // Check if // is inside a string
+        const beforeComment = line.substring(0, commentIndex);
+        const stringMatches = beforeComment.match(/"/g);
         
-        return line;
-      })
-      .filter(line => line.trim().length > 0) // Remove empty lines
-      .join('\n');
+        if (stringMatches && stringMatches.length % 2 === 0) {
+          // Even number of quotes before // means we're outside a string
+          // This is a comment - remove everything from // onwards
+          const beforeCommentTrimmed = beforeComment.trim();
+          
+          // Check if this was a key with a commented value (like "key": //"value")
+          if (beforeCommentTrimmed.endsWith(':')) {
+            // Key with commented value - keep the key, remove the comment
+            cleaned.push(beforeCommentTrimmed);
+            inCommentedValue = true; // Next lines might be part of commented value
+            continue;
+          }
+          
+          // Regular inline comment - keep everything before //
+          if (beforeCommentTrimmed.length > 0) {
+            cleaned.push(beforeCommentTrimmed);
+          }
+          continue;
+        }
+      }
+      
+      // If we're in a commented value, check if this line ends it
+      if (inCommentedValue) {
+        // Check if this line looks like the end of a commented value
+        // (has closing quote, possibly with comma)
+        if (trimmed.includes('",') || (trimmed.includes('"') && !trimmed.startsWith('"'))) {
+          inCommentedValue = false;
+          // Skip this line as it's part of the commented value
+          continue;
+        } else {
+          // Still in commented value, skip this line
+          continue;
+        }
+      }
+      
+      // Normal line - add it
+      cleaned.push(line);
+    }
+    
+    // Join and clean up
+    let result = cleaned.join('\n');
     
     // Clean up trailing commas before closing braces/brackets
-    cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1');
+    result = result.replace(/,(\s*[}\]])/g, '$1');
     
-    return cleaned;
+    // Fix cases where key has no value (like "key":  with nothing after)
+    // This happens when we removed a commented value
+    result = result.replace(/:\s*$/gm, ': null');
+    result = result.replace(/:\s*\n\s*"/gm, ':\n    "'); // Fix formatting
+    
+    return result;
   };
 
   const handleGrpcCall = async () => {

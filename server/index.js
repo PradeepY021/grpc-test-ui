@@ -6,9 +6,33 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware - Allow all origins for deployment (Render, etc.)
+// Middleware - Allow all origins for team sharing (ngrok, Render, etc.)
 app.use(cors({
-  origin: true, // Allow all origins for team sharing
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Allow localhost and ngrok domains
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001'
+    ];
+    
+    // Allow all ngrok domains
+    if (origin.includes('ngrok-free.app') || origin.includes('ngrok.io') || origin.includes('ngrok.app')) {
+      return callback(null, true);
+    }
+    
+    // Allow localhost in any form
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // For team sharing, allow all origins
+    callback(null, true);
+  },
   credentials: true
 }));
 app.use(express.json());
