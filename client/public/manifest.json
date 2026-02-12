@@ -1,0 +1,8 @@
+{
+  "short_name": "gRPC Test UI",
+  "name": "gRPC Test UI - Product Assortment Service",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}

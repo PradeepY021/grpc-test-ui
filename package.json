@@ -1,0 +1,27 @@
+{
+  "name": "grpc-test-ui",
+  "version": "1.0.0",
+  "description": "gRPC Testing UI for Product Assortment Service",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "client": "cd client && npm start",
+    "build": "cd client && npm install && npm run build",
+    "render-build": "npm install && npm run build"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@grpc/grpc-js": "^1.9.14",
+    "@grpc/proto-loader": "^0.7.10",
+    "protobufjs": "^7.2.5",
+    "axios": "^1.6.2",
+    "simple-git": "^3.20.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
+
