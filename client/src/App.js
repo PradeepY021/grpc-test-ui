@@ -485,49 +485,47 @@ function App() {
   };
 
   const stripJsonComments = (jsonString) => {
-    // Remove comments from JSON string
-    // Handles:
-    // 1. Lines starting with // (after whitespace)
-    // 2. Inline comments like: "key": //"value",
-    // 3. Multi-line commented values
-    // 4. Values without keys (when previous key had commented value)
-    // 5. Preserves // inside string values
+    // Remove comments from JSON string and fix structure
+    // Handles cases like: "key": //"old", "new_value",
     
-    const lines = jsonString.split('\n');
+    // First, handle the specific pattern: key with commented value followed by standalone value
+    // Pattern: "key": //"old", "new",
+    let result = jsonString.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*\n\s*"([^"]+)",/g, '"$1": "$2",');
+    
+    // Pattern: "key": //"old", new_value, (unquoted)
+    result = result.replace(/"([^"]+)":\s*\/\/"[^"]*",\s*\n\s*([a-f0-9-]+)\s*,/gi, '"$1": "$2",');
+    
+    // Now handle general comment removal
+    const lines = result.split('\n');
     let cleaned = [];
-    let waitingForValue = false; // Track if we're waiting for a value after a key with commented value
-    let lastKey = null; // Remember the last key that needs a value
+    let waitingForValue = false;
     
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+      let line = lines[i];
       const trimmed = line.trim();
       
-      // Skip lines that are empty or start with //
+      // Skip empty lines or lines starting with //
       if (trimmed.length === 0 || trimmed.startsWith('//')) {
         continue;
       }
       
-      // Check if line has // comment (not at start)
+      // Check for inline comments
       const commentIndex = line.indexOf('//');
       if (commentIndex !== -1) {
-        // Check if // is inside a string
         const beforeComment = line.substring(0, commentIndex);
         const stringMatches = beforeComment.match(/"/g);
         
         if (stringMatches && stringMatches.length % 2 === 0) {
-          // Even number of quotes before // means we're outside a string
           const beforeCommentTrimmed = beforeComment.trim();
           
-          // Check if this was a key with a commented value (like "key": //"value")
+          // Key with commented value
           if (beforeCommentTrimmed.endsWith(':')) {
-            // Key with commented value - keep the key, mark that we're waiting for value
             cleaned.push(beforeCommentTrimmed);
             waitingForValue = true;
-            lastKey = beforeCommentTrimmed.replace(/:\s*$/, '').replace(/^"|"$/g, '');
             continue;
           }
           
-          // Regular inline comment - keep everything before //
+          // Regular inline comment
           if (beforeCommentTrimmed.length > 0) {
             cleaned.push(beforeCommentTrimmed);
           }
@@ -535,50 +533,35 @@ function App() {
         }
       }
       
-      // If we're waiting for a value and this line looks like a standalone value
+      // If waiting for value, check if this line is a standalone value
       if (waitingForValue) {
-        // Check if this is a value without a key
-        // Pattern 1: Quoted value like "value",
-        const quotedValueMatch = trimmed.match(/^"([^"]+)"\s*,?\s*$/);
-        // Pattern 2: Unquoted UUID like 6385d009-d6f7-4566-977a-61c15a375155,
+        // Quoted value: "value",
+        const quotedMatch = trimmed.match(/^"([^"]+)"\s*,?\s*$/);
+        // Unquoted UUID: 6385d009-d6f7-4566-977a-61c15a375155,
         const uuidMatch = trimmed.match(/^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\s*,?\s*$/i);
-        // Pattern 3: Quoted UUID like "6385d009-d6f7-4566-977a-61c15a375155",
-        const quotedUuidMatch = trimmed.match(/^"([a-f0-9-]+)"\s*,?\s*$/i);
         
-        if (quotedValueMatch || uuidMatch || quotedUuidMatch) {
-          // This is a value - attach it to the last key
-          let value;
-          if (quotedValueMatch) {
-            value = `"${quotedValueMatch[1]}"`;
-          } else if (quotedUuidMatch) {
-            value = `"${quotedUuidMatch[1]}"`;
-          } else if (uuidMatch) {
-            value = `"${uuidMatch[1]}"`; // Add quotes to unquoted UUID
+        if (quotedMatch || uuidMatch) {
+          const value = quotedMatch ? `"${quotedMatch[1]}"` : `"${uuidMatch[1]}"`;
+          const lastIndex = cleaned.length - 1;
+          if (lastIndex >= 0) {
+            cleaned[lastIndex] = cleaned[lastIndex] + ' ' + value;
           }
-          
-          const lastLineIndex = cleaned.length - 1;
-          cleaned[lastLineIndex] = cleaned[lastLineIndex] + ' ' + value;
           waitingForValue = false;
-          lastKey = null;
           continue;
         } else {
-          // Not a standalone value, reset waiting state
           waitingForValue = false;
-          lastKey = null;
         }
       }
       
-      // Normal line - add it
       cleaned.push(line);
     }
     
-    // Join and clean up
-    let result = cleaned.join('\n');
+    result = cleaned.join('\n');
     
-    // Clean up trailing commas before closing braces/brackets
+    // Clean up trailing commas
     result = result.replace(/,(\s*[}\]])/g, '$1');
     
-    // Fix cases where key has no value (like "key":  with nothing after)
+    // Fix keys without values
     result = result.replace(/:\s*$/gm, ': null');
     
     // Remove duplicate commas
