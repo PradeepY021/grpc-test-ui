@@ -459,20 +459,40 @@ async function fetchProtoFilesViaAPI(githubToken) {
     timeout: 30000
   });
 
-  // Raw content client (for public files, might bypass IP restrictions)
+  // Raw content client with token authentication for private repos
   const rawClient = axios.create({
     baseURL: 'https://raw.githubusercontent.com',
     headers: {
-      'User-Agent': 'grpc-test-ui'
+      'Authorization': `token ${githubToken}`,
+      'User-Agent': 'grpc-test-ui',
+      'Accept': 'application/vnd.github.v3.raw'
     },
     timeout: 30000
   });
 
-  // Known proto file paths (you can expand this list)
+  // Complete list of proto files in the repository
   const knownProtoPaths = [
     'proto/service/store-product-service/store_product_service.proto',
     'proto/service/store-product-service/store_product_messages.proto',
-    // Add more known paths here if needed
+    'proto/service/store-product-service/store_product_service_.proto',
+    'proto/service/store-product-service/deprecated_messages.proto',
+    'proto/service/store-product-service/store_product_servicepp.proto',
+    'proto/service/category_service/category.proto',
+    'proto/service/category_service/category_messages.proto',
+    'proto/service/catalog-curator-service/catalog_curator_service.proto',
+    'proto/service/filter-attachment-service/filter_attachment_service.proto',
+    'proto/service/infographics/infographics.proto',
+    'proto/service/merch_service/merch_service.proto',
+    'proto/service/merch_service/merch_service_messages.proto',
+    'proto/service/product-card-tags/product_card_tags.proto',
+    'proto/service/spm_service/spm_service.proto',
+    'proto/service/spm_service/spm_service_messages.proto',
+    'proto/service/utility/utility.proto',
+    'proto/events/trending_feed_events.proto',
+    'proto/events/vertical_feed_events.proto',
+    'proto/google/api/annotations.proto',
+    'proto/google/api/http.proto',
+    'proto/validate/validate.proto'
   ];
 
   // Try to get directory listing via API first
@@ -536,22 +556,39 @@ async function fetchProtoFilesViaAPI(githubToken) {
     }
   }
 
-  // Fallback: Fetch known proto files via raw URLs
+  // Fallback: Fetch known proto files via raw URLs with authentication
   async function fetchKnownProtoFilesViaRaw() {
-    console.log('📥 Fetching known proto files via raw.githubusercontent.com...');
+    console.log('📥 Fetching known proto files via raw.githubusercontent.com with token auth...');
+    let successCount = 0;
+    let failCount = 0;
+    
     for (const protoPath of knownProtoPaths) {
       try {
+        // Use authenticated raw URL: https://raw.githubusercontent.com/owner/repo/branch/path
         const rawUrl = `${REPO_OWNER}/${REPO_NAME}/main/${protoPath}`;
         const response = await rawClient.get(rawUrl, { responseType: 'text' });
         
-        const localPath = path.join(PROTO_DIR, protoPath.replace('proto/', ''));
+        // Maintain directory structure
+        const localPath = path.join(PROTO_DIR, protoPath.replace(/^proto\//, ''));
         const dir = path.dirname(localPath);
         await fs.mkdir(dir, { recursive: true });
         await fs.writeFile(localPath, response.data, 'utf-8');
         console.log(`✅ Fetched via raw: ${protoPath}`);
+        successCount++;
       } catch (error) {
-        console.log(`⚠️  Could not fetch ${protoPath}: ${error.message}`);
+        console.log(`⚠️  Could not fetch ${protoPath}: ${error.response?.status || error.message}`);
+        failCount++;
       }
+    }
+    
+    console.log(`📊 Fetched ${successCount} files, ${failCount} failed`);
+    
+    if (successCount === 0) {
+      throw new Error('Failed to fetch any proto files via raw URLs. The repository might be private and raw URLs require different authentication.');
+    }
+    
+    if (failCount > 0) {
+      console.log(`⚠️  Some files failed to fetch. You may need to add more proto file paths to the knownProtoPaths array.`);
     }
   }
   
