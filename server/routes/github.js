@@ -372,5 +372,63 @@ async function readProtoFiles(dir) {
   return files;
 }
 
+/**
+ * Fetch proto files using GitHub API (bypasses IP allow list)
+ */
+async function fetchProtoFilesViaAPI(githubToken) {
+  // Create directories
+  await fs.mkdir(PROTO_DIR, { recursive: true });
+  
+  // GitHub API client
+  const apiClient = axios.create({
+    baseURL: GITHUB_API_BASE,
+    headers: {
+      'Authorization': `token ${githubToken}`,
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'grpc-test-ui'
+    }
+  });
+
+  // Recursively fetch all .proto files from proto directory
+  async function fetchDirectoryContents(dirPath = 'proto', localPath = PROTO_DIR) {
+    try {
+      const response = await apiClient.get(
+        `/repos/${REPO_OWNER}/${REPO_NAME}/contents/${dirPath}`,
+        { params: { ref: 'main' } }
+      );
+      
+      const items = Array.isArray(response.data) ? response.data : [response.data];
+      
+      for (const item of items) {
+        const itemLocalPath = path.join(localPath, item.name);
+        
+        if (item.type === 'file' && item.name.endsWith('.proto')) {
+          // Fetch file content
+          const fileResponse = await apiClient.get(item.url);
+          const content = Buffer.from(fileResponse.data.content, 'base64').toString('utf-8');
+          
+          // Write to local file
+          await fs.writeFile(itemLocalPath, content, 'utf-8');
+          console.log(`✅ Fetched: ${item.path}`);
+        } else if (item.type === 'dir') {
+          // Recursively fetch subdirectory
+          await fs.mkdir(itemLocalPath, { recursive: true });
+          await fetchDirectoryContents(item.path, itemLocalPath);
+        }
+      }
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.log(`⚠️  Directory not found: ${dirPath} (might be empty or not exist)`);
+        return;
+      }
+      throw error;
+    }
+  }
+  
+  console.log('🔍 Fetching proto files from GitHub API...');
+  await fetchDirectoryContents();
+  console.log('✅ All proto files fetched');
+}
+
 module.exports = router;
 
